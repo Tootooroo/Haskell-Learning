@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 import qualified Modules.Tools as Tools
 import qualified Data.Map as Map
@@ -35,6 +36,8 @@ class (Eq a) => Equal a where
 data Number = Number Int deriving (Eq)
 instance Equal Number where
     isEqual x = if x == (Number 1) then True else False
+instance (Equal m) => Equal (Maybe m) where
+    isEqual x = True
 
 
 data TrafficLight = Red | Yellow | Green
@@ -49,7 +52,17 @@ instance Show TrafficLight where
     show Yellow = "Yellow Light"
     show Green = "Green Light"
 
+class YesNo a where
+    yesno :: a -> Bool
+instance YesNo Int where
+    yesno 0 = False
+    yesno _ = True
+
+data Box a = Box a | None deriving (Show)
+instance Functor Box where
+    fmap f (Box a) = Box (f a)
+    fmap f None = None
 
 main = do 
-    print $ isEqual (Number 2) 
+    print $ fmap (*2) (Box 1)
 
