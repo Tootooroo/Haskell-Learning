@@ -63,6 +63,48 @@ instance Functor Box where
     fmap f (Box a) = Box (f a)
     fmap f None = None
 
+solveRPN :: String -> Double
+solveRPN = head . foldl foldFunc [] . words
+    where foldFunc (x:y:ys) "*" = (x * y):ys
+          foldFunc (x:y:ys) "+" = (x + y):ys
+          foldFunc (x:y:ys) "-" = (x - y):ys 
+          foldFunc (x:y:ys) "/" = (x / y):ys
+          foldFunc xs numberString = read numberString:xs
+
+data Section = Section { roadA :: Int, roadB :: Int, roadC :: Int }
+type RoadSystem = [Section]
+data Label = A | B | C deriving (Show)
+type Path = [(Label, Int)]
+roadStep :: (Path, Path) -> Section -> (Path, Path)
+roadStep (pathA, pathB) (Section a b c) = 
+    let totalA = sum $ map snd pathA
+        totalB = sum $ map snd pathB
+        toAFromA = totalA + a
+        toAFromB = totalB + b + c
+        toBFromA = totalA + a + c
+        toBFromB = totalB + b
+        
+        newPathToA = if toAFromA <= toAFromB 
+                     then (A, a):pathA
+                     else (C, c):(B, b):pathB
+        newPathToB = if toBFromA <= toBFromB
+                     then (C, c):(A, a):pathA
+                     else (B, b):pathB
+    in (newPathToA, newPathToB) 
+
+bestPath :: RoadSystem -> Path
+bestPath roadSystem = 
+    let (bestAPath, bestBPath) = foldl roadStep ([], []) roadSystem 
+    in if (sum (map snd bestAPath)) <= (sum (map snd bestBPath))
+       then reverse bestAPath
+       else reverse bestBPath 
+headThrowLondon :: RoadSystem
+headThrowLondon = [ Section 50 10 30,
+                    Section 5 90 20,
+                    Section 40 2 25,
+                    Section 10 8 0
+                  ]
+
 main = do 
-    print $ fmap (*2) (Box 1)
+    print $ bestPath headThrowLondon
 
