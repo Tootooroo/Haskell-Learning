@@ -1,3 +1,5 @@
+-- try.hs
+
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE FlexibleInstances #-}
 
@@ -105,6 +107,15 @@ headThrowLondon = [ Section 50 10 30,
                     Section 10 8 0
                   ]
 
+data MyNum a = MyNum a deriving (Show)
+instance Functor MyNum where
+   fmap f (MyNum n) =  MyNum (f n)
+
+instance Applicative MyNum where 
+    pure = MyNum
+    (MyNum f) <*> (MyNum a) = fmap f (MyNum a)
+
 main = do 
     print $ bestPath headThrowLondon
-
+    print $ fmap (\x -> x + 1) (MyNum 1)
+    print $ (MyNum (\x -> x + 1)) <*> MyNum 1
