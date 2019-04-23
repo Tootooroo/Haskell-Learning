@@ -115,7 +115,56 @@ instance Applicative MyNum where
     pure = MyNum
     (MyNum f) <*> (MyNum a) = fmap f (MyNum a)
 
+
+foldll :: (b -> a -> b) -> b -> [a] -> b
+foldll f b [] = b
+foldll f b (x:xs) = let r = f b x
+                    in foldll f r xs
+
+maximum' :: (Ord a) => [a] -> a
+maximum' [] = error "maximum of empty list"
+maximum' [x] = x
+maximum' (x:xs) = max x (maximum' xs)
+
+replicate' :: Int -> x -> [x]
+replicate' n _ 
+    | n <= 0 = []
+replicate' n x = x : replicate' (n-1) x
+
+take' :: Int -> [xs] -> [xs]
+take' n _
+    | n <= 0 = []
+take' n (x:xs) = x : take' (n-1) xs
+
+reverse' :: [a] -> [a]
+reverse' [] = []
+reverse' (x:xs) = reverse' xs ++ [x]
+
+repeat' :: a -> [a]
+repeat' x = x : repeat' x
+
+elem' :: (Eq a) => a -> [a] -> Bool
+elem' _ [] = False
+elem' a (x:xs) 
+    | a == x = True
+    | otherwise = elem' a xs
+
+zip' :: [l] -> [r] -> [(l, r)]
+zip' [] _ = []
+zip' _ [] = []
+zip' (l:ls) (r:rs) = (l, r) : zip' ls rs 
+
 main = do 
+    print $ elem' 1 [2,1,3]
+    print $ elem' 1 [2,3,4]
+    print $ zip' [1,2,3] [4,5,6]
+    print $ take' 4 (repeat' 5)
+    print $ reverse' [1,2,3,4,5]
+    print $ take' 4 [1,2,3,4,5]
+    print $ maximum' [1,2,3,4]
+    print $ replicate' 4 'a'
     print $ bestPath headThrowLondon
     print $ fmap (\x -> x + 1) (MyNum 1)
     print $ (MyNum (\x -> x + 1)) <*> MyNum 1
+    print $ foldll (\x y -> x + y) 0 [1, 2]
+

@@ -59,3 +59,4 @@ quicksort (x:xs) =
 op :: (Int -> Int -> Int) -> Int -> Int -> Int
 op f x y = (f x) y
 
+
