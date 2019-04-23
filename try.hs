@@ -16,7 +16,7 @@ type Index = Int
 type Value = String
 type PhoneBook k v = [(k, v)]
 
-phoneBook :: Map.Map Index Value 
+phoneBook :: Map.Map Index Value
 phoneBook = Map.fromList $ [ (1, "One"), (2, "Two"), (3, "Three") ]
 findKey :: Index -> [(Index, Value)] -> Maybe Value
 findKey key [] = Nothing
@@ -28,11 +28,11 @@ type ValMap = Map.Map Index Value
 valLookup :: Int -> ValMap -> Either String String
 valLookup idx map = case Map.lookup idx map of
     Nothing -> Left $ "Index" ++ show idx ++ "not exist"
-    Just val -> Right $ val 
+    Just val -> Right $ val
 
 
 -- Class
-class (Eq a) => Equal a where 
+class (Eq a) => Equal a where
     isEqual :: a -> Bool
 
 data Number = Number Int deriving (Eq)
@@ -69,7 +69,7 @@ solveRPN :: String -> Double
 solveRPN = head . foldl foldFunc [] . words
     where foldFunc (x:y:ys) "*" = (x * y):ys
           foldFunc (x:y:ys) "+" = (x + y):ys
-          foldFunc (x:y:ys) "-" = (x - y):ys 
+          foldFunc (x:y:ys) "-" = (x - y):ys
           foldFunc (x:y:ys) "/" = (x / y):ys
           foldFunc xs numberString = read numberString:xs
 
@@ -78,28 +78,28 @@ type RoadSystem = [Section]
 data Label = A | B | C deriving (Show)
 type Path = [(Label, Int)]
 roadStep :: (Path, Path) -> Section -> (Path, Path)
-roadStep (pathA, pathB) (Section a b c) = 
+roadStep (pathA, pathB) (Section a b c) =
     let totalA = sum $ map snd pathA
         totalB = sum $ map snd pathB
         toAFromA = totalA + a
         toAFromB = totalB + b + c
         toBFromA = totalA + a + c
         toBFromB = totalB + b
-        
-        newPathToA = if toAFromA <= toAFromB 
+
+        newPathToA = if toAFromA <= toAFromB
                      then (A, a):pathA
                      else (C, c):(B, b):pathB
         newPathToB = if toBFromA <= toBFromB
                      then (C, c):(A, a):pathA
                      else (B, b):pathB
-    in (newPathToA, newPathToB) 
+    in (newPathToA, newPathToB)
 
 bestPath :: RoadSystem -> Path
-bestPath roadSystem = 
-    let (bestAPath, bestBPath) = foldl roadStep ([], []) roadSystem 
+bestPath roadSystem =
+    let (bestAPath, bestBPath) = foldl roadStep ([], []) roadSystem
     in if (sum (map snd bestAPath)) <= (sum (map snd bestBPath))
        then reverse bestAPath
-       else reverse bestBPath 
+       else reverse bestBPath
 headThrowLondon :: RoadSystem
 headThrowLondon = [ Section 50 10 30,
                     Section 5 90 20,
@@ -111,7 +111,7 @@ data MyNum a = MyNum a deriving (Show)
 instance Functor MyNum where
    fmap f (MyNum n) =  MyNum (f n)
 
-instance Applicative MyNum where 
+instance Applicative MyNum where
     pure = MyNum
     (MyNum f) <*> (MyNum a) = fmap f (MyNum a)
 
@@ -127,7 +127,7 @@ maximum' [x] = x
 maximum' (x:xs) = max x (maximum' xs)
 
 replicate' :: Int -> x -> [x]
-replicate' n _ 
+replicate' n _
     | n <= 0 = []
 replicate' n x = x : replicate' (n-1) x
 
@@ -145,16 +145,30 @@ repeat' x = x : repeat' x
 
 elem' :: (Eq a) => a -> [a] -> Bool
 elem' _ [] = False
-elem' a (x:xs) 
+elem' a (x:xs)
     | a == x = True
     | otherwise = elem' a xs
+
+divideByTen :: (Floating a) => a -> a
+divideByTen = (/10)
 
 zip' :: [l] -> [r] -> [(l, r)]
 zip' [] _ = []
 zip' _ [] = []
-zip' (l:ls) (r:rs) = (l, r) : zip' ls rs 
+zip' (l:ls) (r:rs) = (l, r) : zip' ls rs
 
-main = do 
+zipWith' :: (a -> a -> a) -> [a] -> [a] -> [a]
+zipWith' _ [] _ = []
+zipWith' _ _ [] = []
+zipWith' f (x:xs) (y:ys) = (f x y) : zipWith' f xs ys
+
+applyTwice :: (a -> a) -> a -> a
+applyTwice f a = f (f a)
+
+main = do
+    print $ zipWith' (+) [1,2,3] [1,2,3]
+    print $ applyTwice divideByTen 200
+    print $ divideByTen 200
     print $ elem' 1 [2,1,3]
     print $ elem' 1 [2,3,4]
     print $ zip' [1,2,3] [4,5,6]
@@ -167,4 +181,3 @@ main = do
     print $ fmap (\x -> x + 1) (MyNum 1)
     print $ (MyNum (\x -> x + 1)) <*> MyNum 1
     print $ foldll (\x y -> x + y) 0 [1, 2]
-
