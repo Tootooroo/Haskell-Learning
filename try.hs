@@ -8,7 +8,8 @@ import qualified Data.Map as Map
 import qualified Modules.DataStructs as DataS
 
 data Point = Point Float Float deriving (Show)
-data Shape = Circle Point Float | Rectangle Point Point
+data Shape = Circle Point Float | Rectangle Point Point deriving (Show)
+area :: Shape -> Float
 area (Circle _ r) = pi * r^2
 area (Rectangle (Point x1 y1) (Point x2 y2)) = (abs $ x2 - x1) * (abs $ y2 - y1)
 
@@ -140,6 +141,9 @@ reverse' :: [a] -> [a]
 reverse' [] = []
 reverse' (x:xs) = reverse' xs ++ [x]
 
+reverse_fold :: [a] -> [a]
+reverse_fold = foldl (\acc x -> x : acc) []
+
 repeat' :: a -> [a]
 repeat' x = x : repeat' x
 
@@ -165,7 +169,18 @@ zipWith' f (x:xs) (y:ys) = (f x y) : zipWith' f xs ys
 applyTwice :: (a -> a) -> a -> a
 applyTwice f a = f (f a)
 
+sum' :: (Num a) => [a] -> a
+sum' xs = foldl (\acc x -> acc + x) 0 xs
+
+doSomething :: Float
+doSomething =
+    let point = Point 1 1
+        c = Circle point 1
+    in area c
+
 main = do
+    print $ doSomething
+    print $ sum' [1,2,3]
     print $ zipWith' (+) [1,2,3] [1,2,3]
     print $ applyTwice divideByTen 200
     print $ divideByTen 200
@@ -174,6 +189,7 @@ main = do
     print $ zip' [1,2,3] [4,5,6]
     print $ take' 4 (repeat' 5)
     print $ reverse' [1,2,3,4,5]
+    print $ reverse_fold [1,2,3,4,5]
     print $ take' 4 [1,2,3,4,5]
     print $ maximum' [1,2,3,4]
     print $ replicate' 4 'a'
