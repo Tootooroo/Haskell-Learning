@@ -34,14 +34,13 @@ valLookup idx map = case Map.lookup idx map of
 
 -- Class
 class (Eq a) => Equal a where
-    isEqual :: a -> Bool
+    isEqual :: a -> a -> Bool
 
 data Number = Number Int deriving (Eq)
 instance Equal Number where
-    isEqual x = if x == (Number 1) then True else False
+    isEqual x y = if x == y then True else False
 instance (Equal m) => Equal (Maybe m) where
-    isEqual x = True
-
+    isEqual x y = if x == y then True else False
 
 data TrafficLight = Red | Yellow | Green
 instance Eq TrafficLight where
@@ -116,6 +115,14 @@ instance Applicative MyNum where
     pure = MyNum
     (MyNum f) <*> (MyNum a) = fmap f (MyNum a)
 
+data Things a = Things a deriving (Show)
+instance Functor Things where
+    fmap f (Things a) = Things (f a)
+
+data HereOr a b = Here a | There b
+instance Functor (HereOr a) where
+    fmap f (Here a) = Here a
+    fmap f (There b) = There (f b)
 
 foldll :: (b -> a -> b) -> b -> [a] -> b
 foldll f b [] = b
@@ -174,11 +181,12 @@ sum' xs = foldl (\acc x -> acc + x) 0 xs
 
 doSomething :: Float
 doSomething =
-    let point = Point 1 1
-        c = Circle point 1
-    in area c
+  let point = Point 1 1
+      c = Circle point 1
+  in area c
 
-main = do
+test_main = do
+    print $ (Number 1) == (Number 1)
     print $ doSomething
     print $ sum' [1,2,3]
     print $ zipWith' (+) [1,2,3] [1,2,3]
@@ -197,3 +205,26 @@ main = do
     print $ fmap (\x -> x + 1) (MyNum 1)
     print $ (MyNum (\x -> x + 1)) <*> MyNum 1
     print $ foldll (\x y -> x + y) 0 [1, 2]
+
+type Birds = Int
+type Pole = (Birds, Birds)
+
+landLeft :: Birds -> Pole -> Maybe Pole
+landLeft n (left, right)
+  | abs ((left + n) - right) < 4 = Just (left + n, right)
+  | otherwise = Nothing
+landRight :: Birds -> Pole -> Maybe Pole
+landRight n (left, right)
+  | abs (left - (right + n)) < 4 = Just (left, right + n)
+  | otherwise = Nothing
+x -: f = f x
+
+landBirds_main = do
+  print $ pure (0, 0) >>= landLeft 1 >>= landRight 5
+
+monad_main = do
+  x <- Nothing
+  y <- Just "!"
+  Just (show x ++ y)
+
+main = print $ monad_main
