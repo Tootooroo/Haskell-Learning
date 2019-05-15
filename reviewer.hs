@@ -13,8 +13,18 @@ import System.Posix.Unistd
 type MergeRequestId = Int
 type MergeRequestState = String
 
+data ErrorCode = Code_error | Code_ok deriving (Show, Eq)
+instance Enum ErrorCode where
+  fromEnum code | code == Code_ok = 0
+                | code == Code_error = -1
+  toEnum num | num == 0 = Code_ok
+             | num == -1 = Code_error
+
 gitUrl :: String
 gitUrl = "http://gpon.git.com:8011/api/v4/projects/34/merge_requests?private_token=D_-yvMKXNJcqpQxZr_CU"
+
+sourceUrl :: String
+sourceUrl = "http://gpon.git.com:8011/gpon/olt.git"
 
 -- unit is second
 discoveryInterval :: Int
@@ -60,33 +70,51 @@ mergeReqStateParse o = flip parseMaybe o $ \obj -> do
                   state <- obj .: "state"
                   return (iid, state)
 
-dispatcher :: [(MergeRequestId, MergeRequestState)] -> Int
+-- dispatcher :: [(MergeRequestId, MergeRequestState)] -> Int
 
 data StageId = Prepare | Retrive | Build | Compile | Test deriving(Eq, Show)
+
 instance Enum StageId where
-  fromEnum Prepare = 0
-  fromEnum Retrive = 1
-  fromEnum Build = 2
-  fromEnum Compile = 3
-  fromEnum Test = 4
+  fromEnum id | id == Prepare = 0
+              | id == Retrive = 1
+              | id == Build = 2
+              | id == Compile = 3
+              | id == Test = 4
 
-  toEnum 0 = Prepare
-  toEnum 1 = Retrive
-  toEnum 2 = Build
-  toEnum 3 = Compile
-  toEnum 4 = Test
-  toEnum otherwise = error "key error"
+  toEnum id | id == 0 = Prepare
+            | id == 1 = Retrive
+            | id == 2 = Build
+            | id == 3 = Compile
+            | id == 4 = Test
+            | otherwise = error "key error"
 
-data StageInfo = StageInfo { url :: String }
+data StageInfo = StageInfo { url   :: String,
+                             id    :: Int,
+                             state :: String }
 
-reviewFlow :: (MergeRequestId, MergeRequestState) -> Int
+reviewFlow :: (MergeRequestId, MergeRequestState) -> ErrorCode
+reviewFlow (id, state) =
+  -- First check is argument valid
+  if state /= "opened"
+    then Code_error
+    else let info = StageInfo sourceUrl id state
+         in  stage Prepare info
+             stage Retrive info
+             stage Build   info
+             stage Compile info
+             stage Test    info
+             Code_ok
 
-stage :: StageId -> StageInfo -> Int
-stage id info
-  | id == Prepare = stage_prepare info
+-- stage :: StageId -> StageInfo -> Int
+-- stage id info
+  -- | id == Prepare = stage_prepare info
+  -- | id == Retrive = stage_retrive info
+  -- | id == Build   = stage_build info
+  -- | id == Compile = stage_compile info
+  -- | id == Test    = stage_test info
 
-stage_prepare :: StageInfo -> Int
-stage_retrive :: StageInfo -> Int
-stage_build :: StageInfo -> Int
-stage_compile :: StageInfo -> Int
-stage_test :: StageInfo -> Int
+-- stage_prepare :: StageInfo -> Int
+-- stage_retrive :: StageInfo -> Int
+-- stage_build :: StageInfo -> Int
+-- stage_compile :: StageInfo -> Int
+-- stage_test :: StageInfo -> Int
