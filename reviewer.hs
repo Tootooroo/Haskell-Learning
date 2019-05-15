@@ -60,8 +60,8 @@ discovery manager url = do
   let parsedJson = decode (responseBody response) :: Maybe [Object]
   if parsedJson == Nothing
     then return []
-    else let mergeReqStates = [ fromJust $ mergeReqStateParse x | x <- (fromJust parsedJson)]
-             openMerges = [ x | x <- mergeReqStates, snd x == "opened" ]
+    else let mergeReqStates = [ fromJust $ mergeReqStateParse x | x <- (fromJust parsedJson) ]
+             openMerges = filter ((== "opened") . snd) mergeReqStates
          in return openMerges
 
 mergeReqStateParse :: Object -> Maybe (MergeRequestId, MergeRequestState)
@@ -98,12 +98,10 @@ reviewFlow (id, state) =
   if state /= "opened"
     then Code_error
     else let info = StageInfo sourceUrl id state
-         in  stage Prepare info
-             stage Retrive info
-             stage Build   info
-             stage Compile info
-             stage Test    info
-             Code_ok
+         in  let rets = [ stage x info | x <- [0..4] ]
+             in  if elem Code_error rets
+                    then Code_error
+                    else Code_ok
 
 -- stage :: StageId -> StageInfo -> Int
 -- stage id info
