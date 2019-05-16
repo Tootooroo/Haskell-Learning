@@ -2,13 +2,20 @@
 -- Merge Request Check
 
 import Network.HTTP.Client
+import Network.HTTP.Types.Status (statusCode)
+
 import Data.Aeson as Aeson
 import Data.Maybe
 import Data.Aeson.Types
 import Data.List.NonEmpty
-import Network.HTTP.Types.Status (statusCode)
+
 import System.Process as Process
 import System.Posix.Unistd
+import System.Unix.Directory
+import System.Directory
+
+import Control.Parallel.Strategies
+import Control.DeepSeq
 
 type MergeRequestId = Int
 type MergeRequestState = String
@@ -19,6 +26,31 @@ instance Enum ErrorCode where
                 | code == Code_error = -1
   toEnum num | num == 0 = Code_ok
              | num == -1 = Code_error
+
+data StageId = Prepare | Retrive | Build | Test | Accept deriving(Eq, Show)
+
+instance Enum StageId where
+  fromEnum id | id == Prepare = 0
+              | id == Retrive = 1
+              | id == Build = 2
+              | id == Test = 3
+              | id == Accept = 4
+
+  toEnum id | id == 0 = Prepare
+            | id == 1 = Retrive
+            | id == 2 = Build
+            | id == 3 = Test
+            | id == 4 = Accept
+            | otherwise = error "key error"
+
+data StageInfo = StageInfo { repoUrl    :: String,
+                             mergeId    :: Int,
+                             mergeState :: String,
+                             workingDir :: String }
+
+
+tempDirPath :: String
+tempDirPath = "/home/aydenlin/"
 
 gitUrl :: String
 gitUrl = "http://gpon.git.com:8011/api/v4/projects/34/merge_requests?private_token=D_-yvMKXNJcqpQxZr_CU"
@@ -38,9 +70,12 @@ main = do
 
 daemon_main :: Manager -> String -> IO String
 daemon_main manager url = do
-  openMerges <- discovery_until manager url discoveryInterval
+    openMerges <- discovery_until manager url discoveryInterval
 
-  return "MergeRequest Reviewer exit normally."
+    rets <- dispatcher openMerges
+    if elem Code_error rets 
+        then return "Error"
+        else daemon_main manager url 
 
 -- discovery_until will block until discovery open merge request
 discovery_until :: Manager -> String -> Int -> IO [(MergeRequestId, MergeRequestState)]
@@ -61,7 +96,7 @@ discovery manager url = do
   if parsedJson == Nothing
     then return []
     else let mergeReqStates = [ fromJust $ mergeReqStateParse x | x <- (fromJust parsedJson) ]
-             openMerges = filter ((== "opened") . snd) mergeReqStates
+             openMerges = Prelude.filter ((== "opened") . snd) mergeReqStates
          in return openMerges
 
 mergeReqStateParse :: Object -> Maybe (MergeRequestId, MergeRequestState)
@@ -70,49 +105,65 @@ mergeReqStateParse o = flip parseMaybe o $ \obj -> do
                   state <- obj .: "state"
                   return (iid, state)
 
--- dispatcher :: [(MergeRequestId, MergeRequestState)] -> Int
+dispatcher :: [(MergeRequestId, MergeRequestState)] -> IO [ErrorCode]
+dispatcher (x:xs) = do
+    ret <- taskSpawn x
+    rets <- dispatcher xs
+    return (ret:rets)
 
-data StageId = Prepare | Retrive | Build | Compile | Test deriving(Eq, Show)
+taskSpawn :: (MergeRequestId, MergeRequestState) -> IO ErrorCode
+taskSpawn tArg = runEval $ do
+    rpar (reviewFlow tArg)
 
-instance Enum StageId where
-  fromEnum id | id == Prepare = 0
-              | id == Retrive = 1
-              | id == Build = 2
-              | id == Compile = 3
-              | id == Test = 4
-
-  toEnum id | id == 0 = Prepare
-            | id == 1 = Retrive
-            | id == 2 = Build
-            | id == 3 = Compile
-            | id == 4 = Test
-            | otherwise = error "key error"
-
-data StageInfo = StageInfo { url   :: String,
-                             id    :: Int,
-                             state :: String }
-
-reviewFlow :: (MergeRequestId, MergeRequestState) -> ErrorCode
+reviewFlow :: (MergeRequestId, MergeRequestState) -> IO ErrorCode
 reviewFlow (id, state) =
   -- First check is argument valid
   if state /= "opened"
-    then Code_error
-    else let info = StageInfo sourceUrl id state
-         in  let rets = [ stage x info | x <- [0..4] ]
-             in  if elem Code_error rets
-                    then Code_error
-                    else Code_ok
+    then return Code_error
+    else let info = StageInfo sourceUrl id state ""
+         in  stages info
 
--- stage :: StageId -> StageInfo -> Int
--- stage id info
-  -- | id == Prepare = stage_prepare info
-  -- | id == Retrive = stage_retrive info
-  -- | id == Build   = stage_build info
-  -- | id == Compile = stage_compile info
-  -- | id == Test    = stage_test info
+stages :: StageInfo -> IO ErrorCode
+stages info = do
+    x0 <- return (Code_ok, info)
+    x1 <- stage Prepare x0
+    x2 <- stage Retrive x1
+    x3 <- stage Build   x2
+    xx <- stage Test    x3
+    return (fst xx)
 
--- stage_prepare :: StageInfo -> Int
--- stage_retrive :: StageInfo -> Int
--- stage_build :: StageInfo -> Int
--- stage_compile :: StageInfo -> Int
--- stage_test :: StageInfo -> Int
+
+stage :: StageId -> (ErrorCode, StageInfo) -> IO (ErrorCode, StageInfo)
+stage id (code, info)
+    | code == Code_error = return (Code_error, info)
+    | id == Prepare = stage_prepare info
+    | id == Retrive = stage_retrive info
+    | id == Build   = stage_build info
+    | id == Test    = stage_test info
+
+stage_prepare :: StageInfo -> IO (ErrorCode, StageInfo)
+stage_prepare info = do 
+    path <- mkdtemp tempDirPath
+    setCurrentDirectory path 
+    return (Code_ok, StageInfo (repoUrl info) (mergeId info) (mergeState info) path)
+
+stage_retrive :: StageInfo -> IO (ErrorCode, StageInfo)
+stage_retrive info = do  
+    callProcess "." ["git clone ", repoUrl info]
+    return (Code_ok, info)
+
+stage_build :: StageInfo -> IO (ErrorCode, StageInfo)
+stage_build info = do 
+    setCurrentDirectory $ workingDir info ++ "olt/GBN/src/"
+    callProcess "gcom_gpon_build_boot.bat" ["C:\BuildTool"]
+    callProcess "gcom_gpon_build_boot.bat" ["C:\BuildTool"]
+    return (Code_ok, info)
+
+stage_test :: StageInfo -> IO (ErrorCode, StageInfo)
+stage_test info = do 
+    return (Code_ok, info)
+
+stage_accept :: StageInfo -> IO (ErrorCode, StageInfo)
+stage_accept info = do
+    return (Code_ok, info)
+

@@ -6,6 +6,8 @@
 import qualified Modules.Tools as Tools
 import qualified Data.Map as Map
 import qualified Modules.DataStructs as DataS
+import Control.Parallel.Strategies
+import Control.DeepSeq
 
 data Point = Point Float Float deriving (Show)
 data Shape = Circle Point Float | Rectangle Point Point deriving (Show)
@@ -223,8 +225,15 @@ landBirds_main = do
   print $ pure (0, 0) >>= landLeft 1 >>= landRight 5
 
 monad_main = do
-  x <- Nothing
+  x <- Just 3
   y <- Just "!"
   Just (show x ++ y)
 
-main = print $ monad_main
+parallel_main = runEval $ do
+  a <- rpar (force (map (+5) [1..5000000]) :: [Int])
+  b <- rpar (force (map (+5) [5000001..10000000]) :: [Int])
+  return (a,b)
+
+main = do
+  let x = parallel_main
+  print $ (head . snd) x
