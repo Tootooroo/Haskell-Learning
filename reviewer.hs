@@ -13,9 +13,13 @@ import System.Process as Process
 import System.Posix.Unistd
 import System.Unix.Directory
 import System.Directory
+import System.IO
 
 import Control.Parallel.Strategies
+import Control.Concurrent
 import Control.DeepSeq
+
+import Modules.ConfigReader
 
 type MergeRequestId = Int
 type MergeRequestState = String
@@ -48,6 +52,11 @@ data StageInfo = StageInfo { repoUrl    :: String,
                              mergeState :: String,
                              workingDir :: String }
 
+configFilePath :: String
+configFilePath = "./Config.txt"
+
+scriptDirPath :: String
+scriptDirPath = "./scripts"
 
 tempDirPath :: String
 tempDirPath = "/home/aydenlin/"
@@ -58,13 +67,22 @@ gitUrl = "http://gpon.git.com:8011/api/v4/projects/34/merge_requests?private_tok
 sourceUrl :: String
 sourceUrl = "http://gpon.git.com:8011/gpon/olt.git"
 
--- unit is second
+-- unit is ms
 discoveryInterval :: Int
-discoveryInterval = 300
+discoveryInterval = 300000
 
 main = do
   -- Http client manager
   manager <- newManager defaultManagerSettings
+
+  -- Configuration file parse
+  handle <- openFile configFilePath ReadMode
+  contents <- hGetContents handle
+  let configs = parseConfig contents
+  print configs
+
+  hClose handle
+
   msg <- daemon_main manager gitUrl
   print msg
 
@@ -73,9 +91,9 @@ daemon_main manager url = do
     openMerges <- discovery_until manager url discoveryInterval
 
     rets <- dispatcher openMerges
-    if elem Code_error rets 
+    if elem Code_error rets
         then return "Error"
-        else daemon_main manager url 
+        else daemon_main manager url
 
 -- discovery_until will block until discovery open merge request
 discovery_until :: Manager -> String -> Int -> IO [(MergeRequestId, MergeRequestState)]
@@ -83,7 +101,7 @@ discovery_until manager url interval = do
   openStates <- discovery manager url
   if openStates /= []
     then return openStates
-    else do num <- sleep 5
+    else do num <- threadDelay 5
             discovery_until manager url interval
 
 -- discovery will return list of tuple that represent open merge requests
@@ -132,7 +150,6 @@ stages info = do
     xx <- stage Test    x3
     return (fst xx)
 
-
 stage :: StageId -> (ErrorCode, StageInfo) -> IO (ErrorCode, StageInfo)
 stage id (code, info)
     | code == Code_error = return (Code_error, info)
@@ -142,28 +159,27 @@ stage id (code, info)
     | id == Test    = stage_test info
 
 stage_prepare :: StageInfo -> IO (ErrorCode, StageInfo)
-stage_prepare info = do 
+stage_prepare info = do
     path <- mkdtemp tempDirPath
-    setCurrentDirectory path 
+    setCurrentDirectory path
     return (Code_ok, StageInfo (repoUrl info) (mergeId info) (mergeState info) path)
 
 stage_retrive :: StageInfo -> IO (ErrorCode, StageInfo)
-stage_retrive info = do  
+stage_retrive info = do
     callProcess "." ["git clone ", repoUrl info]
     return (Code_ok, info)
 
 stage_build :: StageInfo -> IO (ErrorCode, StageInfo)
-stage_build info = do 
+stage_build info = do
     setCurrentDirectory $ workingDir info ++ "olt/GBN/src/"
-    callProcess "gcom_gpon_build_boot.bat" ["C:\BuildTool"]
-    callProcess "gcom_gpon_build_boot.bat" ["C:\BuildTool"]
+    callProcess "gcom_gpon_build_boot.bat" ["C:\\BuildTool"]
+    callProcess "gcom_gpon_build_boot.bat" ["C:\\BuildTool"]
     return (Code_ok, info)
 
 stage_test :: StageInfo -> IO (ErrorCode, StageInfo)
-stage_test info = do 
+stage_test info = do
     return (Code_ok, info)
 
 stage_accept :: StageInfo -> IO (ErrorCode, StageInfo)
 stage_accept info = do
     return (Code_ok, info)
-
