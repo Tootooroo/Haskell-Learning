@@ -8,6 +8,8 @@ import Data.Aeson as Aeson
 import Data.Maybe
 import Data.Aeson.Types
 import Data.List.NonEmpty
+import Data.List.Split
+import Data.Either
 
 import System.Process as Process
 import System.Posix.Unistd
@@ -23,6 +25,19 @@ import Modules.ConfigReader
 
 type MergeRequestId = Int
 type MergeRequestState = String
+type MergeReqInfo = (MergeRequestId, MergeRequestState)
+
+type ProjName = String
+type ProjApi  = String
+type ProjUrl  = String
+type ProjInfo = (ProjName, ProjApi, ProjUrl)
+
+projInfoGetName :: ProjInfo -> ProjName
+projInfoGetName (n, a, u) = n
+projInfoGetApi :: ProjInfo -> ProjApi
+projInfoGetApi (n, a, u) = a
+projInfoGetUrl :: ProjInfo -> ProjUrl
+projInfoGetUrl (n, a, u) = u
 
 data ErrorCode = Code_error | Code_ok deriving (Show, Eq)
 instance Enum ErrorCode where
@@ -72,31 +87,53 @@ discoveryInterval :: Int
 discoveryInterval = 300000
 
 main = do
-  -- Http client manager
+  -- Spawn http client manager
   manager <- newManager defaultManagerSettings
 
-  -- Configuration file parse
-  handle <- openFile configFilePath ReadMode
-  contents <- hGetContents handle
-  let configs = parseConfig contents
-  print configs
+  -- Configuration file load and parse
+  configs <- loadConfig configFilePath
 
-  hClose handle
-
-  msg <- daemon_main manager gitUrl
+  -- Daemon boot
+  msg <- daemon_boot manager configs
   print msg
 
-daemon_main :: Manager -> String -> IO String
-daemon_main manager url = do
-    openMerges <- discovery_until manager url discoveryInterval
+loadConfig :: String -> IO [[String]]
+loadConfig configPath = do
+  handle <- openFile configPath ReadMode
+  contents <- hGetContents handle
 
-    rets <- dispatcher openMerges
-    if elem Code_error rets
-        then return "Error"
-        else daemon_main manager url
+  let config = fromRight (("error":[]):[]) $ parseConfig contents
+  return config
+
+daemon_boot :: Manager -> [[String]] -> IO String
+daemon_boot manager configs = do
+  msg <- reviewProcess manager windPath tempDirPath projInfos
+  return msg
+  where projs = listProjConfig configs
+        projInfos  = [ (x, getAccess x, getUrl x) | x <- (fromJust projs) ]
+        getAccess x = fromJust $ mrAccessApiConfig x configs
+        getUrl    x = fromJust $ sourceUrlConfig x configs
+        windPath = fromJust $ windRiverPathConfig configs
+        tempDirPath = fromJust $ tempDirPathConfig configs
+
+reviewProcess :: Manager -> String -> String -> [ProjInfo] -> IO String
+reviewProcess m windRiverPath tempDirPath info = do
+  codes <- dispatcher openMrDiscovery
+  if elem Code_error codes
+    then return "Error"
+    else reviewProcess m windRiverPath tempDirPath info
+
+  where acessApis = [ (projInfoGetUrl x, projInfoGetApi x) | x <- info ]
+        openMrDiscovery =
+          let openMr = [ (fst a, discovery m $ snd a) | a <- accessApis ]
+          in  if null openMr
+                 then threadDelay discoveryInterval
+                      openMrDiscovery
+              else
+                openMr
 
 -- discovery_until will block until discovery open merge request
-discovery_until :: Manager -> String -> Int -> IO [(MergeRequestId, MergeRequestState)]
+discovery_until :: Manager -> String -> Int -> IO [MergeReqInfo]
 discovery_until manager url interval = do
   openStates <- discovery manager url
   if openStates /= []
@@ -105,7 +142,7 @@ discovery_until manager url interval = do
             discovery_until manager url interval
 
 -- discovery will return list of tuple that represent open merge requests
-discovery :: Manager -> String -> IO [(MergeRequestId, MergeRequestState)]
+discovery :: Manager -> String -> IO [MergeReqInfo]
 discovery manager url = do
   request <- parseRequest url
   response <- httpLbs request manager
@@ -117,28 +154,28 @@ discovery manager url = do
              openMerges = Prelude.filter ((== "opened") . snd) mergeReqStates
          in return openMerges
 
-mergeReqStateParse :: Object -> Maybe (MergeRequestId, MergeRequestState)
+mergeReqStateParse :: Object -> Maybe MergeReqInfo
 mergeReqStateParse o = flip parseMaybe o $ \obj -> do
                   iid <- obj .: "iid"
                   state <- obj .: "state"
                   return (iid, state)
 
-dispatcher :: [(MergeRequestId, MergeRequestState)] -> IO [ErrorCode]
+dispatcher :: [(ProjUrl, [MergeReqInfo])] -> IO [ErrorCode]
 dispatcher (x:xs) = do
     ret <- taskSpawn x
     rets <- dispatcher xs
     return (ret:rets)
 
-taskSpawn :: (MergeRequestId, MergeRequestState) -> IO ErrorCode
+taskSpawn :: (ProjUrl, MergeReqInfo) -> IO ErrorCode
 taskSpawn tArg = runEval $ do
     rpar (reviewFlow tArg)
 
-reviewFlow :: (MergeRequestId, MergeRequestState) -> IO ErrorCode
-reviewFlow (id, state) =
+reviewFlow :: (ProjUrl, MergeReqInfo) -> IO ErrorCode
+reviewFlow url (id, state) =
   -- First check is argument valid
   if state /= "opened"
     then return Code_error
-    else let info = StageInfo sourceUrl id state ""
+    else let info = StageInfo id state ""
          in  stages info
 
 stages :: StageInfo -> IO ErrorCode

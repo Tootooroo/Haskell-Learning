@@ -234,6 +234,4 @@ parallel_main = runEval $ do
   b <- rpar (force (map (+5) [5000001..10000000]) :: [Int])
   return (a,b)
 
-main = do
-  let x = parallel_main
-  print $ (head . snd) x
+main = print "123"
