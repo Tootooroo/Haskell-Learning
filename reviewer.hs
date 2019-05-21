@@ -1,6 +1,8 @@
 {-#LANGUAGE OverloadedStrings #-}
 -- Merge Request Check
 
+import Debug.Trace
+
 import Network.HTTP.Client
 import Network.HTTP.Types.Status (statusCode)
 
@@ -92,6 +94,7 @@ main = do
 
   -- Configuration file load and parse
   configs <- loadConfig configFilePath
+  print configs
 
   -- Daemon boot
   msg <- daemon_boot manager configs
@@ -123,14 +126,13 @@ reviewProcess m windRiverPath tempDirPath info = do
     then return "Error"
     else reviewProcess m windRiverPath tempDirPath info
 
-  where acessApis = [ (projInfoGetUrl x, projInfoGetApi x) | x <- info ]
+  where accessApis = [ (projInfoGetUrl x, projInfoGetApi x) | x <- info ]
         openMrDiscovery =
-          let openMr = [ (fst a, discovery m $ snd a) | a <- accessApis ]
-          in  if null openMr
-                 then threadDelay discoveryInterval
-                      openMrDiscovery
-              else
-                openMr
+          let openMr = accessApis >>= \(x,y) -> do
+                return (x, discovery m y)
+          in if null openMr
+             then openMrDiscovery
+             else openMr
 
 -- discovery_until will block until discovery open merge request
 discovery_until :: Manager -> String -> Int -> IO [MergeReqInfo]
@@ -160,22 +162,30 @@ mergeReqStateParse o = flip parseMaybe o $ \obj -> do
                   state <- obj .: "state"
                   return (iid, state)
 
-dispatcher :: [(ProjUrl, [MergeReqInfo])] -> IO [ErrorCode]
+dispatcher :: [(ProjUrl, IO [MergeReqInfo])] -> IO [ErrorCode]
+dispatcher [] = return (Code_error:[])
 dispatcher (x:xs) = do
-    ret <- taskSpawn x
-    rets <- dispatcher xs
-    return (ret:rets)
+  mrList <- snd x
+  let mrPair = [ (fst x, y) | y <- mrList ]
+  codes <- dispatcher_helper mrPair
+  codes_ <- dispatcher xs
+  return (codes ++ codes_)
+  where dispatcher_helper [] = return (Code_error:[])
+        dispatcher_helper (x:xs)  = do
+          code <- taskSpawn x
+          codes <- dispatcher_helper xs
+          return (code:codes)
 
 taskSpawn :: (ProjUrl, MergeReqInfo) -> IO ErrorCode
 taskSpawn tArg = runEval $ do
     rpar (reviewFlow tArg)
 
 reviewFlow :: (ProjUrl, MergeReqInfo) -> IO ErrorCode
-reviewFlow url (id, state) =
+reviewFlow (url, merInfo) = do
   -- First check is argument valid
-  if state /= "opened"
+  if snd merInfo /= "opened"
     then return Code_error
-    else let info = StageInfo id state ""
+    else let info = StageInfo url (fst merInfo) (snd merInfo) ""
          in  stages info
 
 stages :: StageInfo -> IO ErrorCode
