@@ -22,6 +22,7 @@ import System.IO
 import Control.Parallel.Strategies
 import Control.Concurrent
 import Control.DeepSeq
+import Control.Monad.IO.Class
 
 import Modules.ConfigReader
 
@@ -124,15 +125,11 @@ reviewProcess m windRiverPath tempDirPath info = do
   codes <- dispatcher openMrDiscovery
   if elem Code_error codes
     then return "Error"
-    else reviewProcess m windRiverPath tempDirPath info
+    else do num <- threadDelay discoveryInterval
+            reviewProcess m windRiverPath tempDirPath info
 
   where accessApis = [ (projInfoGetUrl x, projInfoGetApi x) | x <- info ]
-        openMrDiscovery =
-          let openMr = accessApis >>= \(x,y) -> do
-                return (x, discovery m y)
-          in if null openMr
-             then openMrDiscovery
-             else openMr
+        openMrDiscovery = accessApis >>= \(x,y) -> [(x, discovery m y)]
 
 -- discovery_until will block until discovery open merge request
 discovery_until :: Manager -> String -> Int -> IO [MergeReqInfo]
@@ -163,14 +160,15 @@ mergeReqStateParse o = flip parseMaybe o $ \obj -> do
                   return (iid, state)
 
 dispatcher :: [(ProjUrl, IO [MergeReqInfo])] -> IO [ErrorCode]
-dispatcher [] = return (Code_error:[])
+dispatcher [] = return (Code_ok:[])
 dispatcher (x:xs) = do
   mrList <- snd x
   let mrPair = [ (fst x, y) | y <- mrList ]
   codes <- dispatcher_helper mrPair
   codes_ <- dispatcher xs
   return (codes ++ codes_)
-  where dispatcher_helper [] = return (Code_error:[])
+  where mrList = snd x
+        dispatcher_helper [] = return (Code_ok:[])
         dispatcher_helper (x:xs)  = do
           code <- taskSpawn x
           codes <- dispatcher_helper xs
