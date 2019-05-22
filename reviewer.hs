@@ -25,6 +25,7 @@ import Control.DeepSeq
 import Control.Monad.IO.Class
 
 import Modules.ConfigReader
+import List.Transformer
 
 type MergeRequestId = Int
 type MergeRequestState = String
@@ -122,14 +123,23 @@ daemon_boot manager configs = do
 
 reviewProcess :: Manager -> String -> String -> [ProjInfo] -> IO String
 reviewProcess m windRiverPath tempDirPath info = do
-  codes <- dispatcher openMrDiscovery
+  openMrs <- openMrDiscovery
+  codes <- dispatcher openMrs
   if elem Code_error codes
     then return "Error"
     else do num <- threadDelay discoveryInterval
             reviewProcess m windRiverPath tempDirPath info
 
   where accessApis = [ (projInfoGetUrl x, projInfoGetApi x) | x <- info ]
-        openMrDiscovery = accessApis >>= \(x,y) -> [(x, discovery m y)]
+        openMrDiscovery = fold (flip (:)) [] id (openMrDiscovery_ m accessApis)
+
+openMrDiscovery_ :: Manager -> [(String, String)] -> ListT IO (ProjUrl, [MergeReqInfo])
+openMrDiscovery_ m [] = List.Transformer.empty
+openMrDiscovery_ m (x:xs) = ListT $ do
+  opens <- liftIO $ discovery m (snd x)
+  if opens == []
+    then return (Cons (fst x, []) (openMrDiscovery_ m xs))
+    else return (Cons (fst x, opens) (openMrDiscovery_ m xs))
 
 -- discovery_until will block until discovery open merge request
 discovery_until :: Manager -> String -> Int -> IO [MergeReqInfo]
@@ -159,11 +169,10 @@ mergeReqStateParse o = flip parseMaybe o $ \obj -> do
                   state <- obj .: "state"
                   return (iid, state)
 
-dispatcher :: [(ProjUrl, IO [MergeReqInfo])] -> IO [ErrorCode]
+dispatcher :: [(ProjUrl, [MergeReqInfo])] -> IO [ErrorCode]
 dispatcher [] = return (Code_ok:[])
 dispatcher (x:xs) = do
-  mrList <- snd x
-  let mrPair = [ (fst x, y) | y <- mrList ]
+  let mrPair = [ (fst x, y) | y <- (snd x) ]
   codes <- dispatcher_helper mrPair
   codes_ <- dispatcher xs
   return (codes ++ codes_)

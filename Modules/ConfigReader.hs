@@ -131,7 +131,6 @@ isProjExists prjName opts = if prjs == Nothing
                                else elem True [ x == prjName | x <- (fromJust $ prjs) ]
   where prjs = searchConfig "Projects" opts
 
-
 windRiverPathConfig :: [[String]] -> Maybe String
 windRiverPathConfig [] = Nothing
 windRiverPathConfig opts = do
