@@ -8,6 +8,7 @@ import qualified Data.Map as Map
 import qualified Modules.DataStructs as DataS
 import Control.Parallel.Strategies
 import Control.DeepSeq
+import Control.Exception
 
 data Point = Point Float Float deriving (Show)
 data Shape = Circle Point Float | Rectangle Point Point deriving (Show)
@@ -234,4 +235,6 @@ parallel_main = runEval $ do
   b <- rpar (force (map (+5) [5000001..10000000]) :: [Int])
   return (a,b)
 
-main = print "123"
+main = catch (print $ div 5 0) handler
+  where handler :: SomeException -> IO ()
+        handler ex = putStrLn $ "Caught exception: " ++ show ex

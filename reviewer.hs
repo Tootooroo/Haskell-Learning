@@ -23,6 +23,7 @@ import Control.Parallel.Strategies
 import Control.Concurrent
 import Control.DeepSeq
 import Control.Monad.IO.Class
+import Control.Exception
 
 import Modules.ConfigReader
 import List.Transformer
@@ -34,14 +35,36 @@ type MergeReqInfo = (MergeRequestId, MergeRequestState)
 type ProjName = String
 type ProjApi  = String
 type ProjUrl  = String
-type ProjInfo = (ProjName, ProjApi, ProjUrl)
+data ProjInfo = ProjInfo {
+  projName :: ProjName,
+  projApi  :: ProjApi,
+  projUrl :: ProjUrl
+}
 
 projInfoGetName :: ProjInfo -> ProjName
-projInfoGetName (n, a, u) = n
+projInfoGetName info = projName info
 projInfoGetApi :: ProjInfo -> ProjApi
-projInfoGetApi (n, a, u) = a
+projInfoGetApi info = projApi info
 projInfoGetUrl :: ProjInfo -> ProjUrl
-projInfoGetUrl (n, a, u) = u
+projInfoGetUrl info = projUrl info
+
+data DispatchInfo = DispatchInfo {
+  baseDir_dis      :: String,
+  projectName_dis  :: String,
+  workInfo_dis     :: (ProjUrl, [MergeReqInfo]),
+  tempDirPath_dis  :: String,
+  manager_dis      :: Manager,
+  acceptApi_dis    :: String
+}
+
+dispatchGetUrl :: DispatchInfo -> ProjUrl
+dispatchGetUrl info = fst $ workInfo_dis info
+
+dispatchGetMergeReqInfos :: DispatchInfo -> [MergeReqInfo]
+dispatchGetMergeReqInfos info = snd $ workInfo_dis info
+
+dispatchGetTempPath :: DispatchInfo -> String
+dispatchGetTempPath info = tempDirPath_dis info
 
 data ErrorCode = Code_error | Code_ok deriving (Show, Eq)
 instance Enum ErrorCode where
@@ -66,10 +89,25 @@ instance Enum StageId where
             | id == 4 = Accept
             | otherwise = error "key error"
 
-data StageInfo = StageInfo { repoUrl    :: String,
-                             mergeId    :: Int,
-                             mergeState :: String,
-                             workingDir :: String }
+data StageInfo = StageInfo {
+  baseDir    :: String,
+  projectName :: String,
+  repoUrl    :: String,
+  mergeId    :: Int,
+  mergeState :: String,
+  workingDir :: String,
+  manager    :: Manager,
+  acceptApi  :: String
+}
+
+buildStagesFromDispatch :: DispatchInfo -> [StageInfo]
+buildStagesFromDispatch info =
+  [ StageInfo base (projectName_dis info) url (mrID x) (mrState x) dir | x <- dispatchGetMergeReqInfos info ]
+  where mrID  info = fst info
+        mrState info = snd info
+        url = dispatchGetUrl info
+        dir = dispatchGetTempPath info
+        base = baseDir_dis info
 
 configFilePath :: String
 configFilePath = "./Config.txt"
@@ -78,13 +116,7 @@ scriptDirPath :: String
 scriptDirPath = "./scripts"
 
 tempDirPath :: String
-tempDirPath = "/home/aydenlin/"
-
-gitUrl :: String
-gitUrl = "http://gpon.git.com:8011/api/v4/projects/34/merge_requests?private_token=D_-yvMKXNJcqpQxZr_CU"
-
-sourceUrl :: String
-sourceUrl = "http://gpon.git.com:8011/gpon/olt.git"
+tempDirPath = "/home/aydenlin/temp"
 
 -- unit is ms
 discoveryInterval :: Int
@@ -96,7 +128,6 @@ main = do
 
   -- Configuration file load and parse
   configs <- loadConfig configFilePath
-  print configs
 
   -- Daemon boot
   msg <- daemon_boot manager configs
@@ -112,34 +143,37 @@ loadConfig configPath = do
 
 daemon_boot :: Manager -> [[String]] -> IO String
 daemon_boot manager configs = do
-  msg <- reviewProcess manager windPath tempDirPath projInfos
+  baseDirPath <- getCurrentDirectory
+  msg <- reviewProcess manager baseDirPath windPath tempDirPath projInfos
   return msg
   where projs = listProjConfig configs
-        projInfos  = [ (x, getAccess x, getUrl x) | x <- (fromJust projs) ]
+        projInfos  = [ ProjInfo x (getAccess x) (getUrl x) | x <- (fromJust projs) ]
         getAccess x = fromJust $ mrAccessApiConfig x configs
         getUrl    x = fromJust $ sourceUrlConfig x configs
-        windPath = fromJust $ windRiverPathConfig configs
         tempDirPath = fromJust $ tempDirPathConfig configs
 
-reviewProcess :: Manager -> String -> String -> [ProjInfo] -> IO String
-reviewProcess m windRiverPath tempDirPath info = do
+reviewProcess :: Manager -> String -> String -> String -> [ProjInfo] -> IO String
+reviewProcess m base acceptApi tempDirPath info = do
   openMrs <- openMrDiscovery
-  codes <- dispatcher openMrs
-  if elem Code_error codes
-    then return "Error"
+  if openMrs /= []
+    then do codes <- dispatcher $ [DispatchInfo base (fst x) (snd x) tempDirPath m  | x <- openMrs ]
+            if elem Code_error codes
+              then return "Error"
+              else do num <- threadDelay discoveryInterval
+                      reviewProcess m base acceptApi tempDirPath info
     else do num <- threadDelay discoveryInterval
-            reviewProcess m windRiverPath tempDirPath info
+            reviewProcess m base acceptApi tempDirPath info
 
-  where accessApis = [ (projInfoGetUrl x, projInfoGetApi x) | x <- info ]
-        openMrDiscovery = fold (flip (:)) [] id (openMrDiscovery_ m accessApis)
-
-openMrDiscovery_ :: Manager -> [(String, String)] -> ListT IO (ProjUrl, [MergeReqInfo])
-openMrDiscovery_ m [] = List.Transformer.empty
-openMrDiscovery_ m (x:xs) = ListT $ do
-  opens <- liftIO $ discovery m (snd x)
-  if opens == []
-    then return (Cons (fst x, []) (openMrDiscovery_ m xs))
-    else return (Cons (fst x, opens) (openMrDiscovery_ m xs))
+  where accessApis = [ (projInfoGetName x, (projInfoGetUrl x, projInfoGetApi x)) | x <- info ]
+        openMrDiscovery = do
+          openMrs <- fold (flip (:)) [] id (openMrDiscovery_helper m accessApis)
+          return $ Prelude.filter ((/=[]) . snd . snd) openMrs
+        openMrDiscovery_helper m [] = List.Transformer.empty
+        openMrDiscovery_helper m (x:xs) = ListT $ do
+          opens <- liftIO $ discovery m (snd . snd $ x)
+          if opens == []
+            then return (Cons (fst x, (fst . snd $ x, [])) (openMrDiscovery_helper m xs))
+            else return (Cons (fst x, (fst . snd $ x, opens)) (openMrDiscovery_helper m xs))
 
 -- discovery_until will block until discovery open merge request
 discovery_until :: Manager -> String -> Int -> IO [MergeReqInfo]
@@ -169,31 +203,29 @@ mergeReqStateParse o = flip parseMaybe o $ \obj -> do
                   state <- obj .: "state"
                   return (iid, state)
 
-dispatcher :: [(ProjUrl, [MergeReqInfo])] -> IO [ErrorCode]
+dispatcher :: [DispatchInfo] -> IO [ErrorCode]
 dispatcher [] = return (Code_ok:[])
 dispatcher (x:xs) = do
-  let mrPair = [ (fst x, y) | y <- (snd x) ]
-  codes <- dispatcher_helper mrPair
+  codes <- dispatcher_helper $ buildStagesFromDispatch x
   codes_ <- dispatcher xs
   return (codes ++ codes_)
-  where mrList = snd x
-        dispatcher_helper [] = return (Code_ok:[])
+
+  where dispatcher_helper [] = return (Code_ok:[])
         dispatcher_helper (x:xs)  = do
           code <- taskSpawn x
           codes <- dispatcher_helper xs
           return (code:codes)
 
-taskSpawn :: (ProjUrl, MergeReqInfo) -> IO ErrorCode
+taskSpawn :: StageInfo -> IO ErrorCode
 taskSpawn tArg = runEval $ do
     rpar (reviewFlow tArg)
 
-reviewFlow :: (ProjUrl, MergeReqInfo) -> IO ErrorCode
-reviewFlow (url, merInfo) = do
+reviewFlow :: StageInfo -> IO ErrorCode
+reviewFlow info = do
   -- First check is argument valid
-  if snd merInfo /= "opened"
+  if mergeState info /= "opened"
     then return Code_error
-    else let info = StageInfo url (fst merInfo) (snd merInfo) ""
-         in  stages info
+    else stages info
 
 stages :: StageInfo -> IO ErrorCode
 stages info = do
@@ -201,7 +233,8 @@ stages info = do
     x1 <- stage Prepare x0
     x2 <- stage Retrive x1
     x3 <- stage Build   x2
-    xx <- stage Test    x3
+    x4 <- stage Test    x3
+    xx <- stage Accept  x4
     return (fst xx)
 
 stage :: StageId -> (ErrorCode, StageInfo) -> IO (ErrorCode, StageInfo)
@@ -211,29 +244,71 @@ stage id (code, info)
     | id == Retrive = stage_retrive info
     | id == Build   = stage_build info
     | id == Test    = stage_test info
+    | id == Accept  = stage_accept info
+
+stage_script_path :: StageId -> StageInfo -> String
+stage_script_path id info
+  | id == Prepare = pathTemplate "prepare"
+  | id == Retrive = pathTemplate "retrive"
+  | id == Build   = pathTemplate "build"
+  | id == Test    = pathTemplate "test"
+  | id == Accept  = pathTemplate "accept"
+  where pathTemplate stage = (baseDir info) ++ "/" ++
+          "scripts/" ++ (projectName info) ++ "/" ++ stage
+
+stage_script_run :: StageId -> StageInfo -> IO ErrorCode
+stage_script_run id info = do
+  exists <- doesFileExist script
+  if exists
+    then do status <- try (callProcess script [""]) :: IO (Either SomeException ())
+            case status of
+              Left ex -> return Code_error
+              Right () -> return Code_ok
+    else return Code_error
+  where script = stage_script_path id info
+
+stage_command_run :: String -> [String] -> IO Bool
+stage_command_run command args = do
+  status <- try (callProcess command args) :: IO (Either SomeException ())
+  case status of
+    Left ex -> return False
+    Right () -> return True
 
 stage_prepare :: StageInfo -> IO (ErrorCode, StageInfo)
 stage_prepare info = do
     path <- mkdtemp tempDirPath
     setCurrentDirectory path
-    return (Code_ok, StageInfo (repoUrl info) (mergeId info) (mergeState info) path)
+    return (Code_ok, info)
 
 stage_retrive :: StageInfo -> IO (ErrorCode, StageInfo)
 stage_retrive info = do
-    callProcess "." ["git clone ", repoUrl info]
-    return (Code_ok, info)
+  status1 <- stage_command_run "git" ["clone", url, projDirName]
+  case status1 of
+    True -> do setCurrentDirectory $ "./" ++ projDirName
+               status2 <- stage_command_run "git" ["fetch", "origin", "merge-requests/" ++
+                                                    (show mrID) ++ "/head:mr-origin-" ++ (show mrID)]
+               status3 <- stage_command_run "git" ["checkout", "mr-origin-" ++ (show mrID)]
+
+               case and [status2, status3] of
+                 False -> return (Code_error, info)
+                 True -> return (Code_ok, info)
+    False -> return (Code_error, info)
+
+  where url = repoUrl info
+        projDirName = projectName info
+        mrID = force $ mergeId info
 
 stage_build :: StageInfo -> IO (ErrorCode, StageInfo)
 stage_build info = do
-    setCurrentDirectory $ workingDir info ++ "olt/GBN/src/"
-    callProcess "gcom_gpon_build_boot.bat" ["C:\\BuildTool"]
-    callProcess "gcom_gpon_build_boot.bat" ["C:\\BuildTool"]
-    return (Code_ok, info)
+  status <- stage_script_run Build info
+  return (status, info)
 
 stage_test :: StageInfo -> IO (ErrorCode, StageInfo)
 stage_test info = do
-    return (Code_ok, info)
+  status <- stage_script_run Test info
+  return (status, info)
 
 stage_accept :: StageInfo -> IO (ErrorCode, StageInfo)
 stage_accept info = do
-    return (Code_ok, info)
+
+  return (status, info)

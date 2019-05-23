@@ -40,11 +40,11 @@ configOption = do
 
 optHead :: GenParser Char st String
 optHead = do
-  def <- try (string "WindRiverPath") <|>
-         try (string "TempDirPath")   <|>
+  def <- try (string "TempDirPath")   <|>
          try (string "MRAccessApi")   <|>
          try (string "Projects")      <|>
-         try (string "SourceUrl")
+         try (string "SourceUrl")     <|>
+         try (string "MRAcceptApi")
   return def
 
 optDefSeperate :: GenParser Char st String
@@ -159,3 +159,6 @@ mrAccessApiConfig prjName opts = pairValueSearch prjName "MRAccessApi" opts
 
 sourceUrlConfig :: String -> [[String]] -> Maybe String
 sourceUrlConfig prjName opts = pairValueSearch prjName "SourceUrl" opts
+
+mrAcceptApiConfig :: String -> [[String]] -> Maybe String
+mrAcceptApiConfig prjName opts = pairValueSearch prjName "MRAcceptApi" opts
